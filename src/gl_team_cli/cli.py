@@ -9,6 +9,7 @@ from typing import Annotated
 import gitlab
 import typer
 from gitlab.base import RESTObject
+from rich.columns import Columns
 from rich.markup import escape
 from rich.table import Table
 
@@ -23,7 +24,7 @@ NCT = timezone(timedelta(hours=11))
 def _format_date(iso_date: str, tz: timezone = NCT) -> str:
     """Convertir une date ISO 8601 (UTC, renvoyee par l'API GitLab) vers `tz`."""
     dt = datetime.fromisoformat(iso_date.replace("Z", "+00:00"))
-    return dt.astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
+    return dt.astimezone(tz).strftime("%Y-%m-%d\n%H:%M:%S")
 
 app = typer.Typer(
     name="gl-team-cli",
@@ -136,6 +137,31 @@ def _action_cell(action_name: str) -> str:
     return f"{icon} {action_name}"
 
 
+_TARGET_PREFIX: dict[str, str] = {
+    "MergeRequest": "!",
+    "Issue": "#",
+    "Milestone": "%",
+}
+
+
+def _target_label(event: RESTObject) -> str:
+    """Texte court et cliquable pour la colonne URL (ex. `#42`, `!17`)."""
+    target_type = getattr(event, "target_type", None)
+    target_iid = getattr(event, "target_iid", None)
+
+    note = getattr(event, "note", None)
+    if target_type in ("Note", "DiffNote", "DiscussionNote") and note:
+        prefix = _TARGET_PREFIX.get(note.get("noteable_type", ""), "")
+        noteable_iid = note.get("noteable_iid")
+        if prefix and noteable_iid:
+            return f":speech_balloon: {prefix}{noteable_iid}"
+
+    prefix = _TARGET_PREFIX.get(target_type or "", "")
+    if prefix and target_iid:
+        return f"{prefix}{target_iid}"
+    return "voir ↗"
+
+
 def _build_target_url(
     gl: gitlab.Gitlab, event: RESTObject, project_cache: ProjectCache
 ) -> str | None:
@@ -181,19 +207,12 @@ def _build_target_url(
     return web_url
 
 
-@app.command()
-def activity(
-    user_id: Annotated[int, typer.Argument(help="ID numerique de l'utilisateur GitLab.")],
-    limit: Annotated[
-        int, typer.Option("--limit", "-n", help="Nombre d'evenements a afficher.")
-    ] = 20,
-) -> None:
-    """Afficher les dernieres activites (evenements) d'un utilisateur."""
+def _client_and_user(user_id: int) -> tuple[gitlab.Gitlab, RESTObject]:
+    """Connexion GitLab + recuperation de l'utilisateur, avec messages d'erreur."""
     try:
         settings = Settings.from_env()
         gl = get_client(settings)
         user = gl.users.get(user_id)
-        events = user.events.list(per_page=limit, get_all=False)
     except ConfigError as exc:
         error_console.print(str(exc))
         raise typer.Exit(code=1) from exc
@@ -203,13 +222,19 @@ def activity(
     except gitlab.GitlabError as exc:
         error_console.print(f"Erreur GitLab : {exc}")
         raise typer.Exit(code=1) from exc
+    return gl, user
+
+
+def _activity_table(gl: gitlab.Gitlab, user: RESTObject, limit: int) -> Table:
+    events = user.events.list(per_page=limit, get_all=False)
 
     table = Table(
-        title=f":hourglass: Dernieres activites de {user.username} (ID {user_id}) :hourglass:",
+        title=f":hourglass: Dernieres activites de {user.username} (ID {user.id}) :hourglass:",
         style="cyan",
         show_lines=True,
+        width=100,
     )
-    table.add_column("Date (NCT, UTC+11)", header_style="bold orange3")
+    table.add_column("Date (NCT+11)", header_style="bold orange3")
     table.add_column("Projet", header_style="bold orange3")
     table.add_column("Action", header_style="bold orange3")
     table.add_column("Cible", header_style="bold orange3")
@@ -225,7 +250,7 @@ def activity(
             if project_info is not None:
                 project_name = project_info.name
         url = _build_target_url(gl, event, project_cache)
-        url_cell = f"[link={url}]{url}[/link]" if url else "-"
+        url_cell = f"[link={url}]{_target_label(event)}[/link]" if url else "-"
         table.add_row(
             _format_date(event.created_at),
             project_name,
@@ -233,53 +258,33 @@ def activity(
             target,
             url_cell,
         )
+    return table
 
-    console.print(table)
 
-
-@app.command()
-def issues(
-    user_id: Annotated[int, typer.Argument(help="ID numerique de l'utilisateur GitLab.")],
-    limit: Annotated[
-        int, typer.Option("--limit", "-n", help="Nombre de tickets a afficher.")
-    ] = 20,
-) -> None:
-    """Afficher les derniers tickets (issues) assignes a un utilisateur."""
-    try:
-        settings = Settings.from_env()
-        gl = get_client(settings)
-        user = gl.users.get(user_id)
-        issue_list = gl.issues.list(
-            assignee_id=user_id,
-            state="opened",
-            # Recupere name/color/text_color par label au lieu de simples
-            # chaines, pour pouvoir reproduire leurs couleurs GitLab.
-            with_labels_details=True,
-            # Sans scope="all", l'API ne cherche que parmi les tickets crees
-            # par le proprietaire du token (comportement par defaut de
-            # l'endpoint global /issues), pas parmi tous ceux accessibles.
-            scope="all",
-            order_by="created_at",
-            sort="desc",
-            per_page=limit,
-            get_all=False,
-        )
-    except ConfigError as exc:
-        error_console.print(str(exc))
-        raise typer.Exit(code=1) from exc
-    except gitlab.GitlabGetError as exc:
-        error_console.print(f"Utilisateur {user_id} introuvable : {exc}")
-        raise typer.Exit(code=1) from exc
-    except gitlab.GitlabError as exc:
-        error_console.print(f"Erreur GitLab : {exc}")
-        raise typer.Exit(code=1) from exc
+def _issues_table(gl: gitlab.Gitlab, user: RESTObject, limit: int) -> Table:
+    issue_list = gl.issues.list(
+        assignee_id=user.id,
+        state="opened",
+        # Recupere name/color/text_color par label au lieu de simples
+        # chaines, pour pouvoir reproduire leurs couleurs GitLab.
+        with_labels_details=True,
+        # Sans scope="all", l'API ne cherche que parmi les tickets crees
+        # par le proprietaire du token (comportement par defaut de
+        # l'endpoint global /issues), pas parmi tous ceux accessibles.
+        scope="all",
+        order_by="created_at",
+        sort="desc",
+        per_page=limit,
+        get_all=False,
+    )
 
     table = Table(
-        title=f":ticket: Derniers tickets assignes a {user.username} (ID {user_id}) :ticket:",
+        title=f":ticket: Derniers tickets assignes a {user.username} (ID {user.id}) :ticket:",
         style="cyan",
         show_lines=True,
+        width=100,
     )
-    table.add_column("Date creation (NCT, UTC+11)", header_style="bold orange3")
+    table.add_column("Date creation (NCT+11)", header_style="bold orange3")
     table.add_column("Projet", header_style="bold orange3")
     table.add_column("Titre", header_style="bold orange3")
     table.add_column("Statut", header_style="bold orange3")
@@ -299,7 +304,7 @@ def issues(
             )
             or "-"
         )
-        url_cell = f"[link={issue.web_url}]{issue.web_url}[/link]"
+        url_cell = f"[link={issue.web_url}]#{issue.iid}[/link]"
         table.add_row(
             _format_date(issue.created_at),
             project_name,
@@ -308,8 +313,59 @@ def issues(
             labels_cell,
             url_cell,
         )
+    return table
 
+
+@app.command()
+def activity(
+    user_id: Annotated[int, typer.Argument(help="ID numerique de l'utilisateur GitLab.")],
+    limit: Annotated[
+        int, typer.Option("--limit", "-n", help="Nombre d'evenements a afficher.")
+    ] = 20,
+) -> None:
+    """Afficher les dernieres activites (evenements) d'un utilisateur."""
+    gl, user = _client_and_user(user_id)
+    try:
+        table = _activity_table(gl, user, limit)
+    except gitlab.GitlabError as exc:
+        error_console.print(f"Erreur GitLab : {exc}")
+        raise typer.Exit(code=1) from exc
     console.print(table)
+
+
+@app.command()
+def issues(
+    user_id: Annotated[int, typer.Argument(help="ID numerique de l'utilisateur GitLab.")],
+    limit: Annotated[
+        int, typer.Option("--limit", "-n", help="Nombre de tickets a afficher.")
+    ] = 20,
+) -> None:
+    """Afficher les derniers tickets (issues) assignes a un utilisateur."""
+    gl, user = _client_and_user(user_id)
+    try:
+        table = _issues_table(gl, user, limit)
+    except gitlab.GitlabError as exc:
+        error_console.print(f"Erreur GitLab : {exc}")
+        raise typer.Exit(code=1) from exc
+    console.print(table)
+
+
+@app.command()
+def dashboard(
+    user_id: Annotated[int, typer.Argument(help="ID numerique de l'utilisateur GitLab.")],
+    limit: Annotated[
+        int, typer.Option("--limit", "-n", help="Nombre de lignes par tableau.")
+    ] = 20,
+) -> None:
+    """Afficher activite et tickets d'un utilisateur, cote a cote."""
+    gl, user = _client_and_user(user_id)
+    try:
+        left = _activity_table(gl, user, limit)
+        right = _issues_table(gl, user, limit)
+    except gitlab.GitlabError as exc:
+        error_console.print(f"Erreur GitLab : {exc}")
+        raise typer.Exit(code=1) from exc
+    console.print(Columns([left, right], padding=(0, 2), equal=True))
 
 
 if __name__ == "__main__":
