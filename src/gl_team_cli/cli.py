@@ -234,7 +234,7 @@ def _activity_table(gl: gitlab.Gitlab, user: RESTObject, limit: int) -> Table:
         show_lines=True,
         width=100,
     )
-    table.add_column("Date (NCT+11)", header_style="bold orange3")
+    table.add_column("Date", header_style="bold orange3")
     table.add_column("Projet", header_style="bold orange3")
     table.add_column("Action", header_style="bold orange3")
     table.add_column("Cible", header_style="bold orange3")
@@ -284,7 +284,7 @@ def _issues_table(gl: gitlab.Gitlab, user: RESTObject, limit: int) -> Table:
         show_lines=True,
         width=100,
     )
-    table.add_column("Date creation (NCT+11)", header_style="bold orange3")
+    table.add_column("Créé le", header_style="bold orange3")
     table.add_column("Projet", header_style="bold orange3")
     table.add_column("Titre", header_style="bold orange3")
     table.add_column("Statut", header_style="bold orange3")
