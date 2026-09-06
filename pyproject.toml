@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.11"
 dependencies = [
     "python-gitlab>=8.5.0",
+    "questionary>=2.1.1",
     "rich>=15.0.0",
     "typer>=0.27.2",
 ]
@@ -30,6 +31,10 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
+
+[[tool.mypy.overrides]]
+module = "questionary.*"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 addopts = "-ra"

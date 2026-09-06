@@ -5,6 +5,7 @@ Values are read from environment variables (optionally loaded from a
 
 - GITLAB_URL:  base URL of the GitLab instance (default: https://gitlab.com)
 - GITLAB_TOKEN: personal/project access token used to authenticate
+- GITLAB_TEAM_IDS: comma-separated user IDs of the team (e.g. "327,364")
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ class ConfigError(RuntimeError):
 class Settings:
     url: str
     token: str
+    team_ids: tuple[int, ...] = ()
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -32,4 +34,15 @@ class Settings:
                 "token, e.g.:\n"
                 "  export GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx"
             )
-        return cls(url=url, token=token)
+        return cls(url=url, token=token, team_ids=cls._parse_team_ids())
+
+    @staticmethod
+    def _parse_team_ids() -> tuple[int, ...]:
+        raw = os.environ.get("GITLAB_TEAM_IDS", "")
+        parts = [chunk.strip() for chunk in raw.split(",") if chunk.strip()]
+        try:
+            return tuple(int(part) for part in parts)
+        except ValueError as exc:
+            raise ConfigError(
+                f"GITLAB_TEAM_IDS contient une valeur non numerique : {raw!r}"
+            ) from exc

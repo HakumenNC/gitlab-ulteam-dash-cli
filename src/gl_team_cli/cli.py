@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 import gitlab
+import questionary
 import typer
 from gitlab.base import RESTObject
 from rich.columns import Columns
@@ -137,31 +138,6 @@ def _action_cell(action_name: str) -> str:
     return f"{icon} {action_name}"
 
 
-_TARGET_PREFIX: dict[str, str] = {
-    "MergeRequest": "!",
-    "Issue": "#",
-    "Milestone": "%",
-}
-
-
-def _target_label(event: RESTObject) -> str:
-    """Texte court et cliquable pour la colonne URL (ex. `#42`, `!17`)."""
-    target_type = getattr(event, "target_type", None)
-    target_iid = getattr(event, "target_iid", None)
-
-    note = getattr(event, "note", None)
-    if target_type in ("Note", "DiffNote", "DiscussionNote") and note:
-        prefix = _TARGET_PREFIX.get(note.get("noteable_type", ""), "")
-        noteable_iid = note.get("noteable_iid")
-        if prefix and noteable_iid:
-            return f":speech_balloon: {prefix}{noteable_iid}"
-
-    prefix = _TARGET_PREFIX.get(target_type or "", "")
-    if prefix and target_iid:
-        return f"{prefix}{target_iid}"
-    return "voir ↗"
-
-
 def _build_target_url(
     gl: gitlab.Gitlab, event: RESTObject, project_cache: ProjectCache
 ) -> str | None:
@@ -225,6 +201,31 @@ def _client_and_user(user_id: int) -> tuple[gitlab.Gitlab, RESTObject]:
     return gl, user
 
 
+# (style Rich, symbole) par type de "noteable" GitLab pour le prefixe de la colonne Cible.
+_REF_STYLE: dict[str, tuple[str, str]] = {
+    "Issue": ("bold orange3", "#"),
+    "MergeRequest": ("bold medium_purple", "!"),
+}
+
+
+def _target_prefix(event: RESTObject) -> str:
+    """`#40 ` (issue) ou `!17 ` (MR) selon la cible de l'evenement (ou son commentaire)."""
+    target_type = getattr(event, "target_type", None)
+    if target_type in _REF_STYLE:
+        iid = getattr(event, "target_iid", None)
+        style, symbol = _REF_STYLE[target_type]
+        return f"[{style}]{symbol}{iid}[/{style}] " if iid else ""
+
+    note = getattr(event, "note", None)
+    if target_type in ("Note", "DiffNote", "DiscussionNote") and note:
+        noteable_type = note.get("noteable_type")
+        noteable_iid = note.get("noteable_iid")
+        if noteable_type in _REF_STYLE and noteable_iid:
+            style, symbol = _REF_STYLE[noteable_type]
+            return f"[{style}]{symbol}{noteable_iid}[/{style}] "
+    return ""
+
+
 def _activity_table(gl: gitlab.Gitlab, user: RESTObject, limit: int) -> Table:
     events = user.events.list(per_page=limit, get_all=False)
 
@@ -238,11 +239,10 @@ def _activity_table(gl: gitlab.Gitlab, user: RESTObject, limit: int) -> Table:
     table.add_column("Projet", header_style="bold orange3")
     table.add_column("Action", header_style="bold orange3")
     table.add_column("Cible", header_style="bold orange3")
-    table.add_column("URL", header_style="bold orange3")
 
     project_cache: ProjectCache = {}
     for event in events:
-        target = event.target_title or event.target_type or "-"
+        target = _target_prefix(event) + escape(event.target_title or event.target_type or "-")
         project_id: int | None = getattr(event, "project_id", None)
         project_name = "-"
         if project_id is not None:
@@ -250,13 +250,13 @@ def _activity_table(gl: gitlab.Gitlab, user: RESTObject, limit: int) -> Table:
             if project_info is not None:
                 project_name = project_info.name
         url = _build_target_url(gl, event, project_cache)
-        url_cell = f"[link={url}]{_target_label(event)}[/link]" if url else "-"
+        # La colonne URL a ete supprimee : on rend "Cible" cliquable a la place.
+        target_cell = f"[link={url}]{target}[/link]" if url else target
         table.add_row(
             _format_date(event.created_at),
             project_name,
             _action_cell(event.action_name),
-            target,
-            url_cell,
+            target_cell,
         )
     return table
 
@@ -289,7 +289,6 @@ def _issues_table(gl: gitlab.Gitlab, user: RESTObject, limit: int) -> Table:
     table.add_column("Titre", header_style="bold orange3")
     table.add_column("Statut", header_style="bold orange3")
     table.add_column("Labels", header_style="bold orange3")
-    table.add_column("URL", header_style="bold orange3")
 
     project_cache: ProjectCache = {}
     for issue in issue_list:
@@ -304,14 +303,17 @@ def _issues_table(gl: gitlab.Gitlab, user: RESTObject, limit: int) -> Table:
             )
             or "-"
         )
-        url_cell = f"[link={issue.web_url}]#{issue.iid}[/link]"
+        # La colonne URL a ete supprimee : on rend "Titre" cliquable a la place.
+        title_cell = (
+            f"[link={issue.web_url}][bold orange3]#{issue.iid}[/bold orange3] "
+            f"{escape(issue.title)}[/link]"
+        )
         table.add_row(
             _format_date(issue.created_at),
             project_name,
-            escape(issue.title),
+            title_cell,
             status_cell,
             labels_cell,
-            url_cell,
         )
     return table
 
@@ -348,6 +350,92 @@ def issues(
         error_console.print(f"Erreur GitLab : {exc}")
         raise typer.Exit(code=1) from exc
     console.print(table)
+
+
+def _team_members(gl: gitlab.Gitlab, team_ids: tuple[int, ...]) -> list[RESTObject]:
+    """Resoudre les IDs de GITLAB_TEAM_IDS en objets utilisateur GitLab."""
+    members: list[RESTObject] = []
+    for user_id in team_ids:
+        try:
+            members.append(gl.users.get(user_id))
+        except gitlab.GitlabError as exc:
+            error_console.print(f"Utilisateur {user_id} introuvable, ignore : {exc}")
+    return members
+
+
+def _select_member(members: list[RESTObject]) -> RESTObject:
+    """Liste navigable au clavier (fleches haut/bas, Entree) pour choisir un membre."""
+    choices = [
+        questionary.Choice(title=f"{m.name} (@{m.username}, ID {m.id})", value=m)
+        for m in members
+    ]
+    member: RESTObject | None = questionary.select(
+        "Choisis un membre de l'equipe :",
+        choices=choices,
+        instruction="(fleches pour naviguer, Entree pour valider)",
+    ).ask()
+    if member is None:  # Ctrl-C / Echap
+        raise typer.Exit(code=1)
+    return member
+
+
+def _select_view() -> str:
+    """Liste navigable au clavier pour choisir quoi afficher."""
+    view: str | None = questionary.select(
+        "Que veux-tu afficher ?",
+        choices=[
+            questionary.Choice(title="Tickets (issues)", value="issues"),
+            questionary.Choice(title="Activite (events)", value="activity"),
+            questionary.Choice(title="Les deux (dashboard)", value="dashboard"),
+        ],
+        instruction="(fleches pour naviguer, Entree pour valider)",
+    ).ask()
+    if view is None:  # Ctrl-C / Echap
+        raise typer.Exit(code=1)
+    return view
+
+
+@app.command()
+def team(
+    limit: Annotated[
+        int, typer.Option("--limit", "-n", help="Nombre de lignes par tableau.")
+    ] = 20,
+) -> None:
+    """Choisir un membre de l'equipe (GITLAB_TEAM_IDS) et afficher son dashboard."""
+    try:
+        settings = Settings.from_env()
+        gl = get_client(settings)
+    except ConfigError as exc:
+        error_console.print(str(exc))
+        raise typer.Exit(code=1) from exc
+
+    if not settings.team_ids:
+        error_console.print(
+            "GITLAB_TEAM_IDS n'est pas defini. Exemple :\n"
+            "  export GITLAB_TEAM_IDS=327,364"
+        )
+        raise typer.Exit(code=1)
+
+    members = _team_members(gl, settings.team_ids)
+    if not members:
+        error_console.print("Aucun membre d'equipe valide trouve.")
+        raise typer.Exit(code=1)
+
+    member = _select_member(members)
+    view = _select_view()
+
+    try:
+        if view == "issues":
+            console.print(_issues_table(gl, member, limit))
+        elif view == "activity":
+            console.print(_activity_table(gl, member, limit))
+        else:  # dashboard
+            left = _activity_table(gl, member, limit)
+            right = _issues_table(gl, member, limit)
+            console.print(Columns([left, right], padding=(0, 2), equal=True))
+    except gitlab.GitlabError as exc:
+        error_console.print(f"Erreur GitLab : {exc}")
+        raise typer.Exit(code=1) from exc
 
 
 @app.command()
