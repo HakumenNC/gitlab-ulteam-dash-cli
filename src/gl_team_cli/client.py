@@ -3,11 +3,26 @@
 from __future__ import annotations
 
 import gitlab
+from gitlab.base import RESTObject
 
 from gl_team_cli.config import Settings
+from gl_team_cli.errors import gitlab_errors
 
 
 def get_client(settings: Settings) -> gitlab.Gitlab:
     """Build an authenticated python-gitlab client."""
-    gl = gitlab.Gitlab(url=settings.url, private_token=settings.token)
-    return gl
+    return gitlab.Gitlab(url=settings.url, private_token=settings.token)
+
+
+def client_and_settings() -> tuple[gitlab.Gitlab, Settings]:
+    """Point d'entree commun des commandes : config lue puis client construit."""
+    with gitlab_errors():
+        settings = Settings.from_env()
+        return get_client(settings), settings
+
+
+def client_and_user(user_id: int) -> tuple[gitlab.Gitlab, RESTObject]:
+    """Comme `client_and_settings`, mais resout aussi l'utilisateur cible."""
+    gl, _ = client_and_settings()
+    with gitlab_errors(f"Utilisateur {user_id} introuvable"):
+        return gl, gl.users.get(user_id)

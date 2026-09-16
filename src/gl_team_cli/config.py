@@ -1,7 +1,7 @@
 """Configuration for the GitLab connection.
 
-Values are read from environment variables (optionally loaded from a
-`.env` file if `python-dotenv` is installed and used by the caller):
+Values are read from environment variables, alimentees au besoin par un
+fichier `.env` a la racine du projet (voir `load_env`) :
 
 - GITLAB_URL:  base URL of the GitLab instance (default: https://gitlab.com)
 - GITLAB_TOKEN: personal/project access token used to authenticate
@@ -12,6 +12,13 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+
+from dotenv import load_dotenv
+
+
+def load_env() -> None:
+    """Charger le `.env` le plus proche, sans ecraser les variables deja exportees."""
+    load_dotenv(override=False)
 
 
 class ConfigError(RuntimeError):
