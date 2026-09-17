@@ -21,8 +21,19 @@ def client_and_settings() -> tuple[gitlab.Gitlab, Settings]:
         return get_client(settings), settings
 
 
-def client_and_user(user_id: int) -> tuple[gitlab.Gitlab, RESTObject]:
-    """Comme `client_and_settings`, mais resout aussi l'utilisateur cible."""
-    gl, _ = client_and_settings()
+def client_and_user(user_id: int | None = None) -> tuple[gitlab.Gitlab, RESTObject]:
+    """Comme `client_and_settings`, mais resout aussi l'utilisateur cible.
+
+    Sans `user_id`, c'est le proprietaire du token (`gl.auth()`) qui est vise.
+    """
+    gl, settings = client_and_settings()
+
+    if user_id is None:
+        with gitlab_errors(f"Erreur GitLab ({settings.url})"):
+            gl.auth()
+        user = gl.user
+        assert user is not None  # garanti par gl.auth() ci-dessus
+        return gl, user
+
     with gitlab_errors(f"Utilisateur {user_id} introuvable"):
         return gl, gl.users.get(user_id)

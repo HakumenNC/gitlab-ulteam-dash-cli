@@ -24,7 +24,11 @@ NCT = timezone(timedelta(hours=11))
 
 # Largeur fixe des tableaux : garantit que les deux moities du dashboard
 # restent alignees cote a cote.
-TABLE_WIDTH = 100
+#
+# Deux tableaux cote a cote occupent 2 * TABLE_WIDTH + 2 (l'espacement de
+# Columns), soit 178 colonnes ici. Ca tient dans un terminal plein ecran en
+# 1920x1080, y compris avec les polices les plus larges (~185 colonnes).
+TABLE_WIDTH = 88
 
 
 def format_date(iso_date: str, tz: timezone = NCT) -> str:

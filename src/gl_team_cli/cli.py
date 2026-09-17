@@ -35,6 +35,10 @@ except PackageNotFoundError:  # execution depuis les sources, sans installation
 # Nombre de lignes par tableau, partage par toutes les commandes.
 LimitOption = Annotated[int, typer.Option("--limit", "-n", help="Nombre de lignes par tableau.")]
 UserIdArgument = Annotated[int, typer.Argument(help="ID numerique de l'utilisateur GitLab.")]
+OptionalUserIdArgument = Annotated[
+    int | None,
+    typer.Argument(help="ID numerique de l'utilisateur GitLab (defaut : soi-meme)."),
+]
 
 # Vues proposees par `team`, indexees par la valeur renvoyee par select_view().
 RENDERERS = {
@@ -112,8 +116,11 @@ def dashboard(user_id: UserIdArgument, limit: LimitOption = 20) -> None:
 
 
 @app.command()
-def mrs(user_id: UserIdArgument, limit: LimitOption = 20) -> None:
-    """Afficher les MR assignees a un utilisateur et celles qu'il doit relire."""
+def mrs(user_id: OptionalUserIdArgument = None, limit: LimitOption = 20) -> None:
+    """Afficher les MR assignees a un utilisateur et celles qu'il doit relire.
+
+    Sans argument, affiche celles du proprietaire du token.
+    """
     gl, user = client_and_user(user_id)
     with gitlab_errors():
         console.print(mrs_columns(gl, user, limit))

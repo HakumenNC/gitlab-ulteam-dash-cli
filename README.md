@@ -110,7 +110,7 @@ uv run gl-team-cli --version
 | `activity <user_id>` | Dernieres activites (evenements) d'un utilisateur |
 | `issues <user_id>` | Tickets ouverts assignes a un utilisateur |
 | `dashboard <user_id>` | Activite et tickets cote a cote |
-| `mrs <user_id>` | MR ouvertes assignees (gauche) et a relire (droite) |
+| `mrs [user_id]` | MR ouvertes assignees (gauche) et a relire (droite) ; sans argument, les siennes |
 | `team` | Choisir un membre (`GITLAB_TEAM_IDS`) puis la vue, au clavier |
 
 Toutes les commandes d'affichage acceptent `--limit / -n` (defaut : 20) :
