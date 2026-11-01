@@ -20,7 +20,9 @@ def test_version() -> None:
     assert "gl-team-cli" in result.output
 
 
-@pytest.mark.parametrize("command", ["whoami", "activity", "issues", "dashboard", "mrs", "team"])
+@pytest.mark.parametrize(
+    "command", ["whoami", "activity", "issues", "dashboard", "mrs", "me", "team"]
+)
 def test_command_is_wired(command: str) -> None:
     """Chaque commande est enregistree et son --help s'affiche sans toucher au reseau."""
     result = runner.invoke(app, [command, "--help"])
@@ -40,4 +42,9 @@ def test_missing_token_exits_1() -> None:
 def test_team_without_team_ids_exits_1(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GITLAB_TOKEN", "glpat-test")
     result = runner.invoke(app, ["team"])
+    assert result.exit_code == 1
+
+
+def test_me_without_token_exits_1() -> None:
+    result = runner.invoke(app, ["me"])
     assert result.exit_code == 1

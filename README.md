@@ -107,16 +107,18 @@ uv run gl-team-cli --version
 | Commande | Effet |
 |---|---|
 | `whoami` | Verifier la connexion et afficher l'utilisateur authentifie |
-| `activity <user_id>` | Dernieres activites (evenements) d'un utilisateur |
-| `issues <user_id>` | Tickets ouverts assignes a un utilisateur |
-| `dashboard <user_id>` | Activite et tickets cote a cote |
+| `activity [user_id]` | Dernieres activites (evenements) d'un utilisateur ; sans argument, les siennes |
+| `issues [user_id]` | Tickets ouverts assignes a un utilisateur ; sans argument, les siens |
+| `dashboard [user_id]` | Activite et tickets cote a cote ; sans argument, les siens |
 | `mrs [user_id]` | MR ouvertes assignees (gauche) et a relire (droite) ; sans argument, les siennes |
+| `me` | Choisir la vue pour soi-meme (proprietaire du token), au clavier |
 | `team` | Choisir un membre (`GITLAB_TEAM_IDS`) puis la vue, au clavier |
 
 Toutes les commandes d'affichage acceptent `--limit / -n` (defaut : 20) :
 
 ```bash
 uv run gl-team-cli dashboard 327 -n 10
+uv run gl-team-cli me            # menu interactif pour soi-meme
 uv run gl-team-cli team          # menu interactif, fleches + Entree
 ```
 

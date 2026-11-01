@@ -34,13 +34,12 @@ except PackageNotFoundError:  # execution depuis les sources, sans installation
 
 # Nombre de lignes par tableau, partage par toutes les commandes.
 LimitOption = Annotated[int, typer.Option("--limit", "-n", help="Nombre de lignes par tableau.")]
-UserIdArgument = Annotated[int, typer.Argument(help="ID numerique de l'utilisateur GitLab.")]
 OptionalUserIdArgument = Annotated[
     int | None,
     typer.Argument(help="ID numerique de l'utilisateur GitLab (defaut : soi-meme)."),
 ]
 
-# Vues proposees par `team`, indexees par la valeur renvoyee par select_view().
+# Vues proposees par `team` et `me`, indexees par la valeur renvoyee par select_view().
 RENDERERS = {
     "issues": issues_table,
     "activity": activity_table,
@@ -92,24 +91,33 @@ def whoami() -> None:
 
 
 @app.command()
-def activity(user_id: UserIdArgument, limit: LimitOption = 20) -> None:
-    """Afficher les dernieres activites (evenements) d'un utilisateur."""
+def activity(user_id: OptionalUserIdArgument = None, limit: LimitOption = 20) -> None:
+    """Afficher les dernieres activites (evenements) d'un utilisateur.
+
+    Sans argument, affiche celles du proprietaire du token.
+    """
     gl, user = client_and_user(user_id)
     with gitlab_errors():
         console.print(activity_table(gl, user, limit))
 
 
 @app.command()
-def issues(user_id: UserIdArgument, limit: LimitOption = 20) -> None:
-    """Afficher les derniers tickets (issues) assignes a un utilisateur."""
+def issues(user_id: OptionalUserIdArgument = None, limit: LimitOption = 20) -> None:
+    """Afficher les derniers tickets (issues) assignes a un utilisateur.
+
+    Sans argument, affiche ceux du proprietaire du token.
+    """
     gl, user = client_and_user(user_id)
     with gitlab_errors():
         console.print(issues_table(gl, user, limit))
 
 
 @app.command()
-def dashboard(user_id: UserIdArgument, limit: LimitOption = 20) -> None:
-    """Afficher activite et tickets d'un utilisateur, cote a cote."""
+def dashboard(user_id: OptionalUserIdArgument = None, limit: LimitOption = 20) -> None:
+    """Afficher activite et tickets d'un utilisateur, cote a cote.
+
+    Sans argument, affiche ceux du proprietaire du token.
+    """
     gl, user = client_and_user(user_id)
     with gitlab_errors():
         console.print(dashboard_columns(gl, user, limit))
@@ -124,6 +132,16 @@ def mrs(user_id: OptionalUserIdArgument = None, limit: LimitOption = 20) -> None
     gl, user = client_and_user(user_id)
     with gitlab_errors():
         console.print(mrs_columns(gl, user, limit))
+
+
+@app.command()
+def me(limit: LimitOption = 20) -> None:
+    """Choisir ce qu'on affiche pour soi-meme (proprietaire du token)."""
+    gl, user = client_and_user()
+    view = select_view()
+
+    with gitlab_errors():
+        console.print(RENDERERS[view](gl, user, limit))
 
 
 @app.command()

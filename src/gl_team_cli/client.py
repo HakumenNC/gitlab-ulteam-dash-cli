@@ -31,9 +31,10 @@ def client_and_user(user_id: int | None = None) -> tuple[gitlab.Gitlab, RESTObje
     if user_id is None:
         with gitlab_errors(f"Erreur GitLab ({settings.url})"):
             gl.auth()
-        user = gl.user
-        assert user is not None  # garanti par gl.auth() ci-dessus
-        return gl, user
+        assert gl.user is not None  # garanti par gl.auth() ci-dessus
+        # `gl.user` est un CurrentUser, sans `.events` : on recharge le User
+        # complet, comme pour les membres de l'equipe.
+        user_id = gl.user.id
 
     with gitlab_errors(f"Utilisateur {user_id} introuvable"):
         return gl, gl.users.get(user_id)
